@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>YOLO Live — Demo (single-file)</title>
+<style>
+  :root{
+  --bg:#0b0f1a; --card:#0f1724; --muted:#94a3b8; --accent:#7c3aed;
+  --glass: rgba(255,255,255,0.04);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+}
+
+html,body{
+  height:100%;
+  margin:0;
+  background:linear-gradient(180deg,#04060a,#081024);
+}
+
+/* responsive wrapper */
+.wrap{
+  max-width:1100px;
+  margin:28px auto;
+  padding:20px;
+  color:#e6eef8;
+}
+
+.header{
+  display:flex;
+  gap:16px;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:14px;
+}
+
+.title{ display:flex; gap:12px; align-items:center; }
+.logo{
+  width:54px; height:54px;
+  border-radius:12px;
+  background:linear-gradient(135deg,var(--accent),#0ea5a7);
+  display:flex; align-items:center; justify-content:center;
+  font-weight:700;
+  box-shadow:0 6px 18px rgba(0,0,0,0.6);
+}
+
+h1{ margin:0; font-size:18px; letter-spacing:0.2px; }
+p.lead{ margin:0; color:var(--muted); font-size:13px; }
+
+.card{
+  background:var(--card);
+  border-radius:12px;
+  padding:12px;
+  box-shadow:0 6px 30px rgba(2,6,23,0.6);
+}
+
+/* ---------- IMPORTANT FIXES ---------- */
+
+.layout{
+  display:grid;
+  grid-template-columns: 640px 1fr;
+  gap:14px;
+}
+
+/* Maintain proper aspect ratio */
+.video-wrap{
+  position:relative;
+  width:100%;
+  background:var(--glass);
+  border-radius:10px;
+  overflow:hidden;
+}
+
+/* FIX: Keep video aspect ratio & stop stretching */
+video{
+  width:100%;
+  height:auto;
+  display:block;
+}
+
+/* FIX: Canvas overlays exactly over video */
+canvas{
+  position:absolute;
+  top:0;
+  left:0;
+  width:100%;
+  height:100%;
+  pointer-events:none;
+  display:block;
+}
+
+#placeholder{
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-direction:column;
+  text-align:center;
+}
+
+/* Responsive mobile layout */
+@media(max-width:980px){
+  .layout{
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Controls */
+.controls{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  padding:12px;
+}
+
+.row{ display:flex; gap:8px; align-items:center; }
+label{ font-size:13px; color:var(--muted); }
+select, input[type="range"]{ width:100%; }
+
+.btn{
+  background:linear-gradient(90deg,var(--accent),#0ea5a7);
+  border:none;
+  color:white;
+  padding:10px 12px;
+  border-radius:8px;
+  font-weight:600;
+  cursor:pointer;
+  box-shadow:0 8px 18px rgba(124,58,237,0.18);
+}
+
+.btn.ghost{
+  background:transparent;
+  border:1px solid rgba(255,255,255,0.06);
+}
+
+.small{ font-size:13px; padding:8px 10px; }
+
+.info{ font-size:12px; color:var(--muted); }
+.stats{ display:flex; gap:8px; flex-wrap:wrap; }
+.chip{ background:rgba(255,255,255,0.03); padding:6px 8px; border-radius:8px; font-size:12px; color:var(--muted); }
+
+.footer{ margin-top:12px; color:var(--muted); font-size:13px; }
+
+.legend{
+  margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;
+}
+.legend .item{ display:flex; gap:6px; align-items:center; font-size:12px; color:var(--muted); }
+.swatch{ width:14px; height:14px; border-radius:3px; border:1px solid rgba(0,0,0,0.2); }
+
+.file{ display:flex; align-items:center; gap:8px; }
+.hidden{ display:none; }
+
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div class="title">
+      <div class="logo">YO</div>
+      <div>
+        <h1>YOLO Live — Single-file demo</h1>
+        <p class="lead">Webcam & image detection using ONNX (YOLO ONNX) with a TFJS fallback. Mobile ready.</p>
+      </div>
+    </div>
+    <div class="chip card" style="padding:8px 12px;">
+      <div style="font-weight:700">For class</div>
+      <div class="info">Bring your model: <code style="color:#9ad1ff">./models/yolov5s.onnx</code> (optional)</div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <div class="card">
+      <div class="video-wrap" id="viewer">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div id="placeholder" style="position:absolute; color:var(--muted); text-align:center;">
+          <div style="font-size:18px; font-weight:600;">Ready</div>
+          <div class="info">Allow camera, choose a device, then click <strong>Start</strong>.</div>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; gap:8px; margin-top:12px;">
+        <div class="stats">
+          <div class="chip" id="modelName">Model: (loading...)</div>
+          <div class="chip" id="fps">FPS: -</div>
+          <div class="chip" id="detections">Detections: -</div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn small" id="screenshotBtn">📸 Screenshot</button>
+          <a class="btn small ghost" id="downloadScreenshot" download="screenshot.png" style="display:none;">Download</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card controls">
+      <div class="row">
+        <div style="flex:1">
+          <label>Camera device</label>
+          <select id="deviceSelect"></select>
+        </div>
+        <div style="width:120px">
+          <label>Resolution</label>
+          <select id="resSelect">
+            <option value="640x480">640×480</option>
+            <option value="1280x720">1280×720</option>
+            <option value="1920x1080">1920×1080</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div style="flex:1">
+          <label>Confidence threshold: <span id="confVal">0.25</span></label>
+          <input id="confRange" type="range" min="0" max="1" step="0.01" value="0.25"/>
+        </div>
+      </div>
+
+      <div class="row">
+        <button class="btn" id="startBtn">Start</button>
+        <button class="btn ghost" id="stopBtn">Stop</button>
+        <label class="file btn ghost small" style="align-items:center;">
+          Upload Image
+          <input id="imgUpload" type="file" accept="image/*" style="display:none"/>
+        </label>
+        <button class="btn ghost small" id="useImageBtn">Detect Image</button>
+      </div>
+
+      <div style="margin-top:6px">
+        <div class="info">Model source: <span id="modelSource">Trying ONNX (./models/yolov5s.onnx) → fallback TFJS coco-ssd</span></div>
+      </div>
+
+      <div class="legend">
+        <div class="item"><div class="swatch" style="background:#7c3aed"></div> Person</div>
+        <div class="item"><div class="swatch" style="background:#0ea5a7"></div> Vehicle</div>
+        <div class="item"><div class="swatch" style="background:#f97316"></div> Animal</div>
+        <div class="item"><div class="swatch" style="background:#ef4444"></div> Misc</div>
+      </div>
+
+      <div class="footer">
+        <div>Notes: This demo uses ONNX Runtime Web for browser-side YOLO inference. If you don't have a model file, the demo will use a TFJS coco-ssd fallback (not YOLO but useful for quick testing).</div>
+        <div style="margin-top:6px">Tip (mobile): if your device has multiple cameras, open the camera select and choose "environment" or use the back camera for better results.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* -------------- Configuration & Helpers -------------- */
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const ctx = overlay.getContext('2d');
+const deviceSelect = document.getElementById('deviceSelect');
+const resSelect = document.getElementById('resSelect');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const confRange = document.getElementById('confRange');
+const confVal = document.getElementById('confVal');
+const modelNameTag = document.getElementById('modelName');
+const fpsTag = document.getElementById('fps');
+const detectionsTag = document.getElementById('detections');
+const screenshotBtn = document.getElementById('screenshotBtn');
+const downloadLink = document.getElementById('downloadScreenshot');
+const imgUpload = document.getElementById('imgUpload');
+const useImageBtn = document.getElementById('useImageBtn');
+const placeholder = document.getElementById('placeholder');
+const modelSourceTag = document.getElementById('modelSource');
+
+let stream = null;
+let raf = null;
+let lastTime = performance.now();
+let frames = 0;
+let fps = 0;
+let running = false;
+let chosenDeviceId = null;
+let modelBackend = null; // 'onnx' | 'tfjs'
+let ortSession = null;
+let tfModel = null;
+let modelLoaded = false;
+let labelsCOCO = null;
+
+/* confidence */
+confRange.addEventListener('input', ()=> confVal.textContent = confRange.value);
+
+/* -- draw box helper -- */
+function drawDetections(dets){
+  const w = overlay.width, h = overlay.height;
+  ctx.clearRect(0,0,w,h);
+  ctx.lineWidth = Math.max(2, Math.round(Math.min(w,h)/200));
+  dets.forEach((d,i)=>{
+    const color = d.color || '#7c3aed';
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.rect(d.x, d.y, d.w, d.h);
+    ctx.stroke();
+    ctx.globalAlpha = 0.85;
+    const label = `${d.label} ${(d.score*100).toFixed(0)}%`;
+    const txtW = ctx.measureText(label).width + 12;
+    const txtH = 20;
+    ctx.fillRect(d.x, d.y - txtH, txtW, txtH);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.fillText(label, d.x + 6, d.y - 5);
+  });
+}
+
+/* map class id to color */
+function colorForLabel(lbl){
+  const palette = ['#7c3aed','#0ea5a7','#f97316','#ef4444','#60a5fa','#eab308','#10b981'];
+  let idx = Math.abs(hashCode(lbl)) % palette.length;
+  return palette[idx];
+}
+function hashCode(s){ return s.split('').reduce((a,b)=>((a<<5)-a)+b.charCodeAt(0),0); }
+
+/* -------------- Camera & devices -------------- */
+async function listCameras(){
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter(d=>d.kind === 'videoinput');
+    deviceSelect.innerHTML = '';
+    cams.forEach((c, i)=>{
+      const opt = document.createElement('option');
+      opt.value = c.deviceId;
+      opt.text = c.label || `Camera ${i+1}`;
+      deviceSelect.appendChild(opt);
+    });
+    if (cams.length>0){
+      chosenDeviceId = cams[0].deviceId;
+    }
+  } catch(e){
+    console.warn('device list error', e);
+  }
+}
+deviceSelect.addEventListener('change', ()=> chosenDeviceId = deviceSelect.value);
+
+/* start/stop camera */
+async function startCamera(){
+  if (stream){ stopCamera(); }
+  const res = resSelect.value.split('x').map(n=>parseInt(n));
+  const constraints = {
+    audio:false,
+    video:{
+      deviceId: chosenDeviceId ? {exact: chosenDeviceId} : undefined,
+      width: { ideal: res[0] },
+      height: { ideal: res[1] },
+      facingMode: 'environment'
+    }
+  };
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = stream;
+    await video.play();
+    overlay.width = video.videoWidth || res[0];
+    overlay.height = video.videoHeight || res[1];
+    placeholder.style.display = 'none';
+    running = true;
+    runLoop();
+  }catch(err){
+    console.error('getUserMedia error', err);
+    alert('Camera access denied or not available.\nIf testing locally, run a local server and allow camera in the browser.');
+  }
+}
+function stopCamera(){
+  running = false;
+  if (raf) cancelAnimationFrame(raf);
+  if (stream){
+    stream.getTracks().forEach(t=>t.stop());
+    stream = null;
+  }
+  placeholder.style.display = '';
+}
+
+/* -------------- ONNX runtime + YOLO load & preprocess -------------- */
+/* We'll attempt to load ONNX Runtime Web (ORT). If available and the model file exists,
+   infer with ONNX. Otherwise fallback to TFJS coco-ssd. */
+
+async function tryLoadONNX(){
+  modelNameTag.textContent = 'Model: Loading ONNX runtime...';
+  try {
+    // load ORT (use CDN)
+    if(typeof ort === 'undefined'){
+      await loadScript('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js');
+    }
+    modelNameTag.textContent = 'Model: ONNX runtime loaded. Loading model...';
+    // Try open model path (relative)
+    const modelPath = './models/yolov5s.onnx';
+    // Create session
+    ort.env.wasm.numThreads = 2;
+    ort.env.wasm.simd = true;
+    ortSession = await ort.InferenceSession.create(modelPath, {executionProviders: ['wasm']});
+    modelLoaded = true;
+    modelBackend = 'onnx';
+    modelNameTag.textContent = 'Model: yolov5s.onnx (ONNX Runtime Web)';
+    modelSourceTag.textContent = 'ONNX: loaded from ./models/yolov5s.onnx';
+    return true;
+  } catch(e){
+    console.warn('ONNX load failed:', e);
+    modelLoaded = false;
+    ortSession = null;
+    modelBackend = null;
+    modelNameTag.textContent = 'Model: ONNX model load failed.';
+    return false;
+  }
+}
+
+/* Basic preprocessing for YOLOv5 ONNX exported model:
+   - Resize input to square (e.g. 640) with letterbox (padding) preserving aspect ratio
+   - Normalize to [0..1], convert HWC->CHW, float32
+   Postprocessing: model outputs Nx85 (x,y,w,h,score, class scores), convert & NMS
+*/
+function letterboxImage(img, size=640){
+  // draw image to an offscreen canvas with letterbox
+  const [w,h] = [img.width, img.height];
+  const r = Math.min(size/w, size/h);
+  const nw = Math.round(w*r);
+  const nh = Math.round(h*r);
+  const dx = Math.floor((size-nw)/2);
+  const dy = Math.floor((size-nh)/2);
+  const off = document.createElement('canvas');
+  off.width = size; off.height = size;
+  const g = off.getContext('2d');
+  g.fillStyle = '#808080';
+  g.fillRect(0,0,size,size);
+  g.drawImage(img, 0, 0, w, h, dx, dy, nw, nh);
+  return {canvas:off, dx, dy, nw, nh, r};
+}
+
+function preprocessYolo(canvasObj){
+  const img = canvasObj.canvas;
+  const size = img.width;
+  const ctx2 = img.getContext('2d');
+  const imgData = ctx2.getImageData(0,0,size,size);
+  // normalize to 0..1 and CHW
+  const data = new Float32Array(3*size*size);
+  for(let y=0;y<size;y++){
+    for(let x=0;x<size;x++){
+      const i = (y*size + x)*4;
+      const r = imgData.data[i];
+      const g = imgData.data[i+1];
+      const b = imgData.data[i+2];
+      const outIndex = y*size + x;
+      data[outIndex] = r/255.0;
+      data[size*size + outIndex] = g/255.0;
+      data[2*size*size + outIndex] = b/255.0;
+    }
+  }
+  // ONNX expects [1,3,size,size]
+  const input = new ort.Tensor('float32', data, [1,3,size,size]);
+  return input;
+}
+
+/* YOLO postprocess: assume output is [1, N, 85] or [N,85]. We'll attempt to detect shape. */
+function sigmoid(x){ return 1/(1+Math.exp(-x)); }
+
+function xywh2xyxy(x,y,w,h){ return [x - w/2, y - h/2, x + w/2, y + h/2]; }
+
+/* Simple NMS (class-agnostic) */
+function nms(boxes, scores, iouThreshold=0.45){
+  const areas = boxes.map(b => (b[2]-b[0])*(b[3]-b[1]));
+  const idxs = scores.map((s,i)=>[s,i]).sort((a,b)=>b[0]-a[0]).map(x=>x[1]);
+  const keep = [];
+  while(idxs.length){
+    const i = idxs.shift();
+    keep.push(i);
+    for(let j = idxs.length-1; j>=0; j--){
+      const k = idxs[j];
+      const xx1 = Math.max(boxes[i][0], boxes[k][0]);
+      const yy1 = Math.max(boxes[i][1], boxes[k][1]);
+      const xx2 = Math.min(boxes[i][2], boxes[k][2]);
+      const yy2 = Math.min(boxes[i][3], boxes[k][3]);
+      const w = Math.max(0, xx2-xx1);
+      const h = Math.max(0, yy2-yy1);
+      const inter = w*h;
+      const ovr = inter / (areas[i] + areas[k] - inter + 1e-6);
+      if (ovr > iouThreshold) idxs.splice(j,1);
+    }
+  }
+  return keep;
+}
+
+/* Run inference using ONNX session */
+async function runOnnxInference(inputImage, confThresh){
+  if (!ortSession) return [];
+  const size = inputImage.canvas.width;
+  const inputTensor = preprocessYolo(inputImage);
+  const feeds = {};
+  // find input name
+  const inputName = ortSession.inputNames ? ortSession.inputNames[0] : ortSession.inputNames[0];
+  feeds[inputName] = inputTensor;
+  const outputMap = await ortSession.run(feeds);
+  // Attempt to find the detection output
+  const outName = Object.keys(outputMap)[0];
+  let out = outputMap[outName];
+  // out.data is Float32Array with shape info in out.dims
+  const dims = out.dims; // [1, N, 85] or [N,85]
+  const data = out.data;
+  let rows = dims[1] || dims[0];
+  let stride = dims[2] || dims[1] || 85;
+  // parse rows
+  const detsRaw = [];
+  for(let i=0;i<rows;i++){
+    const base = i*stride;
+    const cx = data[base + 0];
+    const cy = data[base + 1];
+    const w = data[base + 2];
+    const h = data[base + 3];
+    const objConf = data[base + 4];
+    // class scores
+    let bestClass = -1;
+    let bestScore = 0;
+    for(let c=0;c<stride-5;c++){
+      const sc = data[base + 5 + c];
+      if (sc > bestScore){ bestScore = sc; bestClass = c; }
+    }
+    const score = objConf * bestScore;
+    if (score > confThresh){
+      detsRaw.push({cx,cy,w,h,score,cls:bestClass});
+    }
+  }
+  // Convert from letterbox coords back to original video coordinates
+  // note: inputs are in size x size coordinate system (0..size)
+  const boxes = detsRaw.map(d=>{
+    const [x1,y1,x2,y2] = xywh2xyxy(d.cx, d.cy, d.w, d.h);
+    return [x1/size, y1/size, x2/size, y2/size];
+  });
+  const scores = detsRaw.map(d=>d.score);
+  const keep = nms(boxes, scores, 0.45);
+  // build final detections mapping to overlay canvas size
+  const results = keep.map(i=>{
+    const d = detsRaw[i];
+    const b = boxes[i];
+    const canvasW = overlay.width;
+    const canvasH = overlay.height;
+    const x = Math.max(0, b[0]*canvasW);
+    const y = Math.max(0, b[1]*canvasH);
+    const w = Math.max(0, (b[2]-b[0])*canvasW);
+    const h = Math.max(0, (b[3]-b[1])*canvasH);
+    const label = `class ${d.cls}`;
+    return {x,y,w,h,score:d.score,label, color:colorForLabel(label)};
+  });
+  return results;
+}
+
+/* -------------- TFJS fallback (coco-ssd) -------------- */
+async function loadTFJSFallback(){
+  modelNameTag.textContent = 'Model: loading TFJS coco-ssd fallback...';
+  try {
+    if (typeof tf === 'undefined') {
+      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js');
+    }
+    if (typeof cocoSsd === 'undefined'){
+      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd');
+    }
+    tfModel = await cocoSsd.load();
+    labelsCOCO = null;
+    modelBackend = 'tfjs';
+    modelLoaded = true;
+    modelNameTag.textContent = 'Model: coco-ssd (TFJS fallback)';
+    modelSourceTag.textContent = 'Fallback: TFJS coco-ssd';
+    return true;
+  } catch(e){
+    console.error('TFJS fallback load failed', e);
+    modelLoaded = false;
+    return false;
+  }
+}
+
+async function runTFJSInference(img, confThresh){
+  // img can be video or image HTML element
+  const preds = await tfModel.detect(img, 20);
+  const results = preds.filter(p=>p.score >= confThresh).map(p=>{
+    return {
+      x: p.bbox[0],
+      y: p.bbox[1],
+      w: p.bbox[2],
+      h: p.bbox[3],
+      score: p.score,
+      label: p.class,
+      color: colorForLabel(p.class)
+    };
+  });
+  return results;
+}
+
+/* -------------- Main loop -------------- */
+async function runLoop(){
+  if (!running) return;
+  const now = performance.now();
+  frames++;
+  if (now - lastTime >= 1000){
+    fps = frames;
+    frames = 0;
+    lastTime = now;
+    fpsTag.textContent = `FPS: ${fps}`;
+  }
+
+  // inference every frame (or could skip frames)
+  const confThresh = parseFloat(confRange.value);
+  let dets = [];
+  try {
+    if (modelBackend === 'onnx' && ortSession){
+      // prepare letterbox from current video frame
+      const tmp = document.createElement('canvas');
+      tmp.width = 640; tmp.height = 640;
+      const g = tmp.getContext('2d');
+      g.drawImage(video, 0, 0, tmp.width, tmp.height);
+      dets = await runOnnxInference({canvas:tmp}, confThresh);
+    } else if (modelBackend === 'tfjs' && tfModel){
+      dets = await runTFJSInference(video, confThresh);
+    }
+  } catch(e){
+    console.warn('inference error', e);
+  }
+
+  detectionsTag.textContent = `Detections: ${dets.length}`;
+  drawDetections(dets);
+
+  raf = requestAnimationFrame(runLoop);
+}
+
+/* -------------- Utilities -------------- */
+function loadScript(src){
+  return new Promise((res, rej)=>{
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = ()=>res();
+    s.onerror = (e)=> rej(e);
+    document.head.appendChild(s);
+  });
+}
+
+/* -------------- UI events -------------- */
+startBtn.addEventListener('click', async ()=>{
+  startBtn.disabled = true;
+  await listCameras();
+  await tryLoadONNX().catch(()=>{});
+  if (!modelLoaded){
+    // fallback
+    await loadTFJSFallback();
+  }
+  await startCamera();
+  startBtn.disabled = false;
+});
+
+stopBtn.addEventListener('click', ()=>{
+  stopCamera();
+});
+
+screenshotBtn.addEventListener('click', ()=>{
+  // draw combined video+overlay to an offscreen
+  const c = document.createElement('canvas');
+  c.width = overlay.width; c.height = overlay.height;
+  const g = c.getContext('2d');
+  g.drawImage(video, 0, 0, c.width, c.height);
+  g.drawImage(overlay, 0, 0);
+  downloadLink.href = c.toDataURL('image/png');
+  downloadLink.style.display = 'inline-block';
+  downloadLink.click();
+});
+
+/* image upload detection */
+let uploadedImg = null;
+imgUpload.addEventListener('change', (ev)=>{
+  const f = ev.target.files[0];
+  if (!f) return;
+  const url = URL.createObjectURL(f);
+  const img = new Image();
+  img.onload = ()=> {
+    uploadedImg = img;
+    // display image in video area by drawing to video element via canvas hack
+    overlay.width = img.width;
+    overlay.height = img.height;
+    const ctx2 = overlay.getContext('2d');
+    ctx2.clearRect(0,0,overlay.width,overlay.height);
+    ctx2.drawImage(img, 0, 0, overlay.width, overlay.height);
+  };
+  img.src = url;
+});
+
+useImageBtn.addEventListener('click', async ()=>{
+  if (!uploadedImg) return alert('Upload an image first.');
+  const conf = parseFloat(confRange.value);
+  let dets = [];
+  if (modelBackend === 'onnx'){
+    // create letterbox of uploaded image and run ONNX
+    const lb = letterboxImage(uploadedImg, 640);
+    const res = await runOnnxInference({canvas: lb.canvas}, conf);
+    // adjust positions to actual uploaded image size (overlay dimensions)
+    // Our runOnnxInference converts normalized to overlay.width/height already
+    dets = res;
+  } else if (modelBackend === 'tfjs'){
+    dets = await runTFJSInference(uploadedImg, conf);
+  } else {
+    alert('No model loaded.');
+    return;
+  }
+  detectionsTag.textContent = `Detections: ${dets.length}`;
+  drawDetections(dets);
+});
+
+/* initial setup */
+(async function init(){
+  await listCameras();
+  // set default res
+  resSelect.value = "640x480";
+  confVal.textContent = confRange.value;
+  modelNameTag.textContent = 'Model: idle (click Start)';
+  fpsTag.textContent = 'FPS: -';
+  detectionsTag.textContent = 'Detections: -';
+})();
+</script>
+</body>
+</html>
